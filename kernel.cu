@@ -9,7 +9,7 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
-__constant__ float convolutionKernelStore[256];
+__constant__ float KernelStore[256];
 
 __global__ void convolve(unsigned char* source, int width, int height, int paddingX, int paddingY, size_t kOffset, int kWidth, int kHeight, unsigned char* destination)
 {
@@ -31,8 +31,7 @@ __global__ void convolve(unsigned char* source, int width, int height, int paddi
 			{
 				int ki = (i + pWidth);
 				int kj = (j + pHeight);
-				float w = convolutionKernelStore[(kj * kWidth) + ki + kOffset];
-
+				float w = KernelStore[(kj * kWidth) + ki + kOffset];
 
 				sum += w * float(source[((y + j) * width) + (x + i)]);
 			}
@@ -119,7 +118,7 @@ int main(int argc, char* argv[])
 		4.f / 159.f, 9.f / 159.f, 12.f / 159.f, 9.f / 159.f, 4.f / 159.f,
 		2.f / 159.f, 4.f / 159.f, 5.f / 159.f, 4.f / 159.f, 2.f / 159.f,
 	};
-	cudaMemcpyToSymbol(convolutionKernelStore, gaussianKernel5x5, sizeof(gaussianKernel5x5), 0);
+	cudaMemcpyToSymbol(KernelStore, gaussianKernel5x5, sizeof(gaussianKernel5x5), 0);
 	const size_t gaussianKernel5x5Offset = 0;
 
 	const float sobelGradientX[9] =
@@ -134,8 +133,8 @@ int main(int argc, char* argv[])
 		0.f, 0.f, 0.f,
 		-1.f, -2.f, -1.f,
 	};
-	cudaMemcpyToSymbol(convolutionKernelStore, sobelGradientX, sizeof(sobelGradientX), sizeof(gaussianKernel5x5));
-	cudaMemcpyToSymbol(convolutionKernelStore, sobelGradientY, sizeof(sobelGradientY), sizeof(gaussianKernel5x5) + sizeof(sobelGradientX));
+	cudaMemcpyToSymbol(KernelStore, sobelGradientX, sizeof(sobelGradientX), sizeof(gaussianKernel5x5));
+	cudaMemcpyToSymbol(KernelStore, sobelGradientY, sizeof(sobelGradientY), sizeof(gaussianKernel5x5) + sizeof(sobelGradientX));
 	const size_t sobelGradientXOffset = sizeof(gaussianKernel5x5) / sizeof(float);
 	const size_t sobelGradientYOffset = sizeof(sobelGradientX) / sizeof(float) + sobelGradientXOffset;
 
@@ -145,7 +144,7 @@ int main(int argc, char* argv[])
         -1.f, 5.f, -1.f,
         0.f, -1.f, 0.f,
     };
-    cudaMemcpyToSymbol(convolutionKernelStore, sharpen, sizeof(sharpen), sizeof(gaussianKernel5x5) + sizeof(sobelGradientX) + sizeof(sobelGradientY));
+    cudaMemcpyToSymbol(KernelStore, sharpen, sizeof(sharpen), sizeof(gaussianKernel5x5) + sizeof(sobelGradientX) + sizeof(sobelGradientY));
     const size_t sharpenoffset = sizeof(sobelGradientY) / sizeof(float) + sobelGradientYOffset /* + sobelGradientXOffset*/;
 
     // Creando imagenes compartidas CPU/GPU shared images - una para la inicial y otra para el resultado
@@ -159,6 +158,14 @@ int main(int argc, char* argv[])
 	cudaMalloc(&deviceGradientX, frame.size().width * frame.size().height);
 	cudaMalloc(&deviceGradientY, frame.size().width * frame.size().height);
 
+    //  parametros de lanzamiento del kernel
+    dim3 cblocks(frame.size().width / 16, frame.size().height / 16);
+    dim3 cthreads(16, 16);
+
+    //  parametros del kernel de pitagoras
+    dim3 pblocks(frame.size().width * frame.size().height / 256);
+    dim3 pthreads(256, 1);
+
     //ciclo para capturar imagenes
     while (1)
     {
@@ -169,14 +176,6 @@ int main(int argc, char* argv[])
         
         cudaEventRecord(start);
 		{
-            //  parametros de lanzamiento del kernel
-			dim3 cblocks(frame.size().width / 16, frame.size().height / 16);
-			dim3 cthreads(16, 16);
-
-			//  parametros del kernel de pitagoras
-			dim3 pblocks(frame.size().width * frame.size().height / 256);
-			dim3 pthreads(256, 1);
-
             if (filterSel == 1)
             {
                 convolve << <cblocks, cthreads >> > (grayImage, frame.size().width, frame.size().height, 0, 0, gaussianKernel5x5Offset, 5, 5, filteredImage);
@@ -194,6 +193,12 @@ int main(int argc, char* argv[])
             cudaThreadSynchronize();
         }
         cudaEventRecord(stop);
+
+        // Elapsed time
+        float ms = 0.0f;
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&ms, start, stop);
+        std::cout << "Tiempo GPU: " << ms << " ms" << std::endl;
 
         cv::imshow("Source", frame);
         cv::imshow("GrayScale", gray);
@@ -216,4 +221,11 @@ int main(int argc, char* argv[])
             filterSel = 3;
         }
     }
+
+    cudaFreeHost(gray.data);
+    cudaFreeHost(filtered.data);
+    cudaFree(deviceGradientX);
+    cudaFree(deviceGradientY);
+
+    return 0;
 }
