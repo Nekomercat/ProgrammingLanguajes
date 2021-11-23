@@ -41,7 +41,7 @@ __global__ void convolve(unsigned char* source, int width, int height, int paddi
 	destination[(y * width) + x] = (unsigned char)sum;
 }
 
-__global__ void pythagoras(unsigned char* a, unsigned char* b, unsigned char* c)
+__global__ void magnitude(unsigned char* a, unsigned char* b, unsigned char* c)
 {
     int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
@@ -112,11 +112,11 @@ int main(int argc, char* argv[])
     //filtro gausiano
 	const float gaussianKernel5x5[25] =
 	{
-		2.f / 159.f, 4.f / 159.f, 5.f / 159.f, 4.f / 159.f, 2.f / 159.f,
-		4.f / 159.f, 9.f / 159.f, 12.f / 159.f, 9.f / 159.f, 4.f / 159.f,
-		5.f / 159.f, 12.f / 159.f, 15.f / 159.f, 12.f / 159.f, 5.f / 159.f,
-		4.f / 159.f, 9.f / 159.f, 12.f / 159.f, 9.f / 159.f, 4.f / 159.f,
-		2.f / 159.f, 4.f / 159.f, 5.f / 159.f, 4.f / 159.f, 2.f / 159.f,
+		1.f / 256.f, 4.f / 256.f, 6.f / 256.f, 4.f / 256.f, 1.f / 256.f,
+		4.f / 256.f, 16.f / 256.f, 24.f / 256.f, 16.f / 256.f, 4.f / 256.f,
+		6.f / 256.f, 24.f / 256.f, 36.f / 256.f, 24.f / 256.f, 6.f / 256.f,
+		4.f / 256.f, 16.f / 256.f, 24.f / 256.f, 16.f / 256.f, 4.f / 256.f,
+		1.f / 256.f, 4.f / 256.f, 6.f / 256.f, 4.f / 256.f, 1.f / 256.f,
 	};
 	cudaMemcpyToSymbol(KernelStore, gaussianKernel5x5, sizeof(gaussianKernel5x5), 0);
 	const size_t gaussianKernel5x5Offset = 0;
@@ -188,7 +188,7 @@ int main(int argc, char* argv[])
             {
                 convolve << <cblocks, cthreads >> > (grayImage, frame.size().width, frame.size().height, 2, 2, sobelGradientXOffset, 3, 3, deviceGradientX);
                 convolve << <cblocks, cthreads >> > (grayImage, frame.size().width, frame.size().height, 2, 2, sobelGradientYOffset, 3, 3, deviceGradientY);
-                pythagoras << <pblocks, pthreads >> > (deviceGradientX, deviceGradientY, filteredImage);
+                magnitude << <pblocks, pthreads >> > (deviceGradientX, deviceGradientY, filteredImage);
             }
             cudaThreadSynchronize();
         }
